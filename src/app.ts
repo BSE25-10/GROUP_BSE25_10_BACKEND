@@ -28,6 +28,7 @@ import { sessionDeviceRoutes } from "./routes/sessionDeviceRoutes"; // Route han
 import { statusRoutes } from "./routes/statusRoutes"; // Route handling for status updates
 import { twoFARoutes } from "./routes/twoFARoutes"; // Route handling for two-factor authentication
 import { userRoutes } from "./routes/userRoutes"; // Route handling for user operations
+import { register, httpRequestCounter } from "./metrics";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -83,6 +84,15 @@ app.use("/peerjs", peerServer);
 // Middleware for parsing JSON and URL-encoded data
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+// Count all HTTP requests for Prometheus
+app.use((req, res, next) => {
+  res.on("finish", () => {
+    const route = req.route?.path || req.path || "unknown";
+    httpRequestCounter.labels(req.method, route, String(res.statusCode)).inc();
+  });
+  next();
+});
+
 
 // Custom logging middleware using Winston logger
 app.use((req: Request, res: Response, next) => {
@@ -126,6 +136,17 @@ app.use(keepActiveRoutes);
 // Custom error controller for handling errors in the application
 app.use(errorController);
 
+// Prometheus metrics endpoint
+app.get("/metrics", async (req: Request, res: Response) => {
+  try {
+    res.setHeader("Content-Type", register.contentType);
+    const metrics = await register.metrics();
+    res.send(metrics);
+  } catch (err) {
+    res.status(500).send((err as Error).message);
+  }
+});
+
 // Catch-all route for handling unknown routes with Winston logging
 app.use("*", (req: Request, res: Response) => {
   logger.warn(`Route not found: ${req.method} ${req.originalUrl}`); // Log missing routes
@@ -134,6 +155,7 @@ app.use("*", (req: Request, res: Response) => {
     message: "Route not found!",
   });
 });
+
 
 // Define the port on which the server will listen
 const PORT = 8000;
